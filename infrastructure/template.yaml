@@ -1,0 +1,165 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Stock AI Agent - AWS Strands Agents SDK with Bedrock
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment
+
+  BedrockModelId:
+    Type: String
+    Default: us.amazon.nova-pro-v1:0
+    Description: Bedrock inference profile ID to use for the agent
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARNING
+      - ERROR
+    Description: Logging level for the Lambda function
+
+Globals:
+  Function:
+    Timeout: 120
+    MemorySize: 512
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        LOG_LEVEL: !Ref LogLevel
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+        PYTHONPATH: /var/task/src
+
+Resources:
+  # Lambda Execution Role
+  StockAgentExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub stock-agent-execution-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub arn:aws:bedrock:${AWS::Region}::foundation-model/*
+                  - !Sub arn:aws:bedrock:us-*::foundation-model/*
+
+  # Stock Agent Lambda Function
+  StockAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub stock-agent-${Environment}
+      Description: Stock AI Agent powered by AWS Bedrock
+      CodeUri: ../
+      Handler: lambda.handler.handler
+      Role: !GetAtt StockAgentExecutionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
+      Events:
+        ApiQuery:
+          Type: Api
+          Properties:
+            RestApiId: !Ref StockAgentApi
+            Path: /query
+            Method: POST
+        ApiOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref StockAgentApi
+            Path: /query
+            Method: OPTIONS
+      Tags:
+        Project: stock-ai-agent
+        Environment: !Ref Environment
+
+  # Stock Agent for Bedrock AgentCore
+  StockAgentBedrockFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub stock-agent-bedrock-${Environment}
+      Description: Stock AI Agent for Bedrock AgentCore integration
+      CodeUri: ../
+      Handler: lambda.handler.bedrock_agent_handler
+      Role: !GetAtt StockAgentExecutionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
+      Tags:
+        Project: stock-ai-agent
+        Environment: !Ref Environment
+
+  # API Gateway
+  StockAgentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub stock-agent-api-${Environment}
+      StageName: !Ref Environment
+      Description: REST API for Stock AI Agent
+      Cors:
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+        AllowOrigin: "'*'"
+      Tags:
+        Project: stock-ai-agent
+        Environment: !Ref Environment
+
+  # CloudWatch Log Group
+  StockAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/stock-agent-${Environment}
+      RetentionInDays: 30
+
+  StockAgentBedrockLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/stock-agent-bedrock-${Environment}
+      RetentionInDays: 30
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${StockAgentApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}/query
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiEndpoint
+
+  StockAgentFunctionArn:
+    Description: Stock Agent Lambda Function ARN
+    Value: !GetAtt StockAgentFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-FunctionArn
+
+  StockAgentBedrockFunctionArn:
+    Description: Stock Agent Bedrock Lambda Function ARN
+    Value: !GetAtt StockAgentBedrockFunction.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-BedrockFunctionArn
+
+  ExecutionRoleArn:
+    Description: Lambda Execution Role ARN
+    Value: !GetAtt StockAgentExecutionRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-ExecutionRoleArn
