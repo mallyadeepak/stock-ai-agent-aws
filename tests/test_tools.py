@@ -239,7 +239,7 @@ class TestConfig:
         config = AgentConfig()
 
         assert config.aws_region == "us-east-1"
-        assert "claude" in config.model_id.lower()
+        assert "nova" in config.model_id.lower()
         assert config.max_tokens > 0
         assert 0 <= config.temperature <= 1
 
