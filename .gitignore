@@ -78,6 +78,7 @@ samconfig.toml
 # Lambda packaging
 lambda/package/
 lambda/*.zip
+deploy/
 
 # Local development
 .python-version
